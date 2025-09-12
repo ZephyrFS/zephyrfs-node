@@ -1,0 +1,66 @@
+[package]
+name = "zephyrfs-node"
+version = "0.1.0"
+edition = "2021"
+authors = ["espadonne (mfw)"]
+license = "MIT"
+description = "Core P2P node implementation for ZephyrFS distributed storage"
+repository = "https://github.com/ZephyrFS/zephyrfs-node"
+
+[dependencies]
+# LibP2P networking stack
+libp2p = { version = "0.54", features = [
+    "tcp",
+    "mdns", 
+    "noise",
+    "yamux",
+    "kad",
+    "ping",
+    "identify",
+    "gossipsub",
+    "dcutr"
+]}
+tokio = { version = "1.39", features = ["full"] }
+
+# Storage and database
+rocksdb = "0.22"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
+# Cryptography and hashing
+blake3 = "1.5"
+sha2 = "0.10"
+rand = "0.8"
+
+# Protocol buffers
+prost = "0.13"
+prost-types = "0.13"
+tonic = "0.12"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Configuration
+config = "0.14"
+clap = { version = "4.5", features = ["derive"] }
+
+# Async utilities
+futures = "0.3"
+async-trait = "0.1"
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[[bin]]
+name = "zephyrfs-node"
+path = "src/main.rs"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
