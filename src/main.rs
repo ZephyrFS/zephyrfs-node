@@ -7,9 +7,13 @@ mod config;
 mod network;
 mod storage;
 mod protocol;
+mod node_manager;
+
+#[cfg(test)]
+mod integration_tests;
 
 use config::Config;
-use network::NetworkManager;
+use node_manager::{NodeManager, DistributionStrategy};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -46,18 +50,24 @@ async fn main() -> Result<()> {
     let config = Config::load(args.config.as_deref())?;
     info!("Configuration loaded: {:?}", config);
     
-    // Initialize network manager
-    let mut network_manager = NetworkManager::new(config).await?;
+    // Determine storage path
+    let storage_path = std::env::current_dir()?
+        .join("zephyrfs_storage");
     
-    // Start the node
-    info!("Starting P2P networking...");
-    network_manager.start().await?;
+    // Initialize integrated node manager
+    let mut node_manager = NodeManager::new(config.clone(), storage_path).await?;
+    
+    // Start the integrated node
+    info!("Starting integrated ZephyrFS node...");
+    node_manager.start().await?;
+    
+    info!("ZephyrFS Node is running. Press Ctrl+C to stop.");
     
     // Keep running until shutdown signal
     tokio::signal::ctrl_c().await?;
     warn!("Shutdown signal received");
     
-    network_manager.shutdown().await?;
+    node_manager.shutdown().await?;
     info!("ZephyrFS Node stopped");
     
     Ok(())

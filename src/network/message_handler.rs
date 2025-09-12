@@ -1,9 +1,11 @@
 use anyhow::Result;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
+use crate::storage::StorageManager;
 
 /// Message types that can be exchanged between peers
 /// 
@@ -69,6 +71,7 @@ pub struct MessageHandler {
     message_tx: Option<mpsc::Sender<ZephyrMessage>>,
     message_rx: Option<mpsc::Receiver<ZephyrMessage>>,
     pending_requests: HashMap<String, PendingRequest>,
+    storage_manager: Option<Arc<StorageManager>>,
 }
 
 #[derive(Debug)]
@@ -89,7 +92,16 @@ impl MessageHandler {
             message_tx: Some(message_tx),
             message_rx: Some(message_rx),
             pending_requests: HashMap::new(),
+            storage_manager: None,
         }
+    }
+    
+    /// Set the storage manager for chunk operations
+    /// 
+    /// Safety: Enables secure chunk storage and retrieval operations
+    pub fn set_storage_manager(&mut self, storage_manager: Arc<StorageManager>) {
+        info!("Integrating MessageHandler with StorageManager");
+        self.storage_manager = Some(storage_manager);
     }
     
     /// Process incoming message with validation and security checks
@@ -232,15 +244,71 @@ impl MessageHandler {
         chunk_id: String, 
         expected_hash: String
     ) -> Result<Option<ZephyrMessage>> {
-        // TODO: Integrate with storage layer
-        warn!("Chunk storage not yet implemented, rejecting request for: {}", chunk_id);
+        info!("Processing chunk request: {} (expected hash: {})", chunk_id, expected_hash);
         
-        Ok(Some(ZephyrMessage::ChunkResponse {
-            chunk_id,
-            data: vec![],
-            hash: expected_hash,
-            success: false,
-        }))
+        // Check if storage manager is available
+        let storage_manager = match &self.storage_manager {
+            Some(sm) => sm,
+            None => {
+                warn!("Storage manager not available, rejecting chunk request: {}", chunk_id);
+                return Ok(Some(ZephyrMessage::ChunkResponse {
+                    chunk_id,
+                    data: vec![],
+                    hash: expected_hash,
+                    success: false,
+                }));
+            }
+        };
+        
+        // Attempt to retrieve chunk from storage
+        match storage_manager.retrieve_chunk(&chunk_id).await {
+            Ok(Some(chunk_data)) => {
+                // Verify the chunk hash matches expected
+                let actual_hash = {
+                    use sha2::{Digest, Sha256};
+                    let mut hasher = Sha256::new();
+                    hasher.update(&chunk_data);
+                    hex::encode(hasher.finalize())
+                };
+                
+                if actual_hash == expected_hash {
+                    info!("Successfully serving chunk: {} ({} bytes)", chunk_id, chunk_data.len());
+                    Ok(Some(ZephyrMessage::ChunkResponse {
+                        chunk_id,
+                        data: chunk_data,
+                        hash: actual_hash,
+                        success: true,
+                    }))
+                } else {
+                    warn!("Chunk hash mismatch for {}: expected {}, got {}", 
+                          chunk_id, expected_hash, actual_hash);
+                    Ok(Some(ZephyrMessage::ChunkResponse {
+                        chunk_id,
+                        data: vec![],
+                        hash: expected_hash,
+                        success: false,
+                    }))
+                }
+            }
+            Ok(None) => {
+                debug!("Chunk not found locally: {}", chunk_id);
+                Ok(Some(ZephyrMessage::ChunkResponse {
+                    chunk_id,
+                    data: vec![],
+                    hash: expected_hash,
+                    success: false,
+                }))
+            }
+            Err(e) => {
+                error!("Error retrieving chunk {}: {}", chunk_id, e);
+                Ok(Some(ZephyrMessage::ChunkResponse {
+                    chunk_id,
+                    data: vec![],
+                    hash: expected_hash,
+                    success: false,
+                }))
+            }
+        }
     }
     
     /// Handle chunk response
@@ -251,11 +319,39 @@ impl MessageHandler {
         hash: String,
         success: bool,
     ) {
-        if success {
-            info!("Successfully received chunk: {} ({}bytes)", chunk_id, data.len());
-            // TODO: Validate hash and store chunk
+        if success && !data.is_empty() {
+            info!("Successfully received chunk: {} ({} bytes)", chunk_id, data.len());
+            
+            // Validate hash
+            let actual_hash = {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(&data);
+                hex::encode(hasher.finalize())
+            };
+            
+            if actual_hash != hash {
+                error!("Received chunk {} with invalid hash: expected {}, got {}", 
+                       chunk_id, hash, actual_hash);
+                return;
+            }
+            
+            // Store chunk if storage manager is available
+            if let Some(storage_manager) = &self.storage_manager {
+                match storage_manager.store_chunk(&chunk_id, &data).await {
+                    Ok(stored_hash) => {
+                        info!("Successfully stored received chunk: {} (hash: {})", 
+                              chunk_id, stored_hash);
+                    }
+                    Err(e) => {
+                        error!("Failed to store received chunk {}: {}", chunk_id, e);
+                    }
+                }
+            } else {
+                warn!("Received chunk {} but storage manager not available", chunk_id);
+            }
         } else {
-            warn!("Failed to retrieve chunk: {}", chunk_id);
+            warn!("Failed to retrieve chunk: {} (success: {})", chunk_id, success);
         }
     }
     

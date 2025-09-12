@@ -363,6 +363,24 @@ impl StorageManager {
         self.metadata_store.file_exists(file_id).await
     }
     
+    /// Retrieve a specific chunk by ID (for P2P sharing)
+    /// 
+    /// Safety: Verifies chunk integrity before returning
+    /// Transparency: Logs all chunk access attempts
+    pub async fn retrieve_chunk(&self, chunk_id: &str) -> Result<Option<Vec<u8>>> {
+        debug!("Retrieving chunk for P2P sharing: {}", chunk_id);
+        self.chunk_store.retrieve_chunk(chunk_id).await
+    }
+    
+    /// Store a chunk directly (for P2P receiving)
+    /// 
+    /// Safety: Includes full integrity verification
+    /// Transparency: Logs all chunk storage operations
+    pub async fn store_chunk(&self, chunk_id: &str, data: &[u8]) -> Result<String> {
+        debug!("Storing chunk from P2P: {} ({} bytes)", chunk_id, data.len());
+        self.chunk_store.store_chunk(chunk_id, data).await
+    }
+    
     /// Get current storage capacity information
     /// 
     /// Transparency: Real-time capacity metrics for monitoring
