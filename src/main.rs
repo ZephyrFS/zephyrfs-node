@@ -8,6 +8,7 @@ mod network;
 mod storage;
 mod protocol;
 mod node_manager;
+mod crypto;
 
 #[cfg(test)]
 mod integration_tests;
@@ -108,7 +109,7 @@ async fn main() -> Result<()> {
         .init();
     
     match args.command {
-        Some(Commands::HealthCheck) | None if std::env::args().any(|arg| arg == "--health-check") => {
+        Some(Commands::HealthCheck) => {
             // Simple health check for Docker/monitoring
             info!("Health check passed");
             Ok(())
@@ -118,8 +119,12 @@ async fn main() -> Result<()> {
             init_node(storage_path, max_storage_gb, args.config.as_deref()).await
         }
         
-        Some(Commands::Start { daemon }) | None => {
+        Some(Commands::Start { daemon }) => {
             start_node(daemon, args.config.as_deref()).await
+        }
+        
+        None => {
+            start_node(false, args.config.as_deref()).await
         }
         
         Some(Commands::Join { bootstrap_peer }) => {
