@@ -18,6 +18,10 @@ pub mod verification;
 pub mod audit;
 pub mod proof;
 
+// Phase 5.1: Economic Foundation & Token System
+pub mod economics;
+pub mod allocation;
+
 pub use crypto::{
     ZephyrCrypto, CryptoParams, ScryptParams, AesParams, HashParams,
     ContentHasher, VerificationHasher, EncryptedData, ContentId, HashAlgorithm
@@ -44,4 +48,13 @@ pub use audit::{
 pub use proof::{
     UnifiedProofManager, UnifiedProofConfig, ComprehensiveChallenge,
     ComprehensiveVerificationResult as ProofVerificationResult, ProofStatistics
+};
+
+// Phase 5.1: Economic system exports
+pub use economics::{
+    TokenEconomicsManager, ZephyrCoin, NetworkHealthController, ZephyrCoinAMM,
+    EarningsCalculator, PaymentProcessor, PayoutScheduler, PerformanceRewardsSystem
+};
+pub use allocation::{
+    DemocraticAllocationManager, AllocationStrategy, AllocationQuality
 };
