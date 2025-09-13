@@ -504,6 +504,23 @@ impl StorageManager {
             None
         }
     }
+
+    /// Get chunk IDs for a file (needed for coordinator integration)
+    ///
+    /// Returns the list of chunk IDs that comprise the given file
+    pub async fn get_file_chunks(&self, file_id: &str) -> Result<Option<Vec<String>>> {
+        debug!("Getting chunk list for file: {}", file_id);
+
+        match self.metadata_store.get_file(file_id).await? {
+            Some(metadata) => {
+                Ok(Some(metadata.chunk_ids))
+            }
+            None => {
+                debug!("File not found: {}", file_id);
+                Ok(None)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

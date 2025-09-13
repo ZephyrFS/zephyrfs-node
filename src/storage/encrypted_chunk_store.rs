@@ -504,7 +504,7 @@ mod tests {
     #[tokio::test]
     async fn test_encrypted_chunk_store_creation() {
         let temp_dir = tempdir().unwrap();
-        let store = EncryptedChunkStore::new(temp_dir.path()).await.unwrap();
+        let store = EncryptedChunkStore::new(temp_dir.path()).unwrap();
         let stats = store.get_encrypted_stats().await;
         
         assert_eq!(stats.total_encrypted_chunks, 0);
@@ -515,7 +515,7 @@ mod tests {
     #[tokio::test]
     async fn test_encrypted_chunk_deduplication() {
         let temp_dir = tempdir().unwrap();
-        let store = EncryptedChunkStore::new(temp_dir.path()).await.unwrap();
+        let store = EncryptedChunkStore::new(temp_dir.path()).unwrap();
         
         let encrypted_data = EncryptedData {
             segment_index: 0,

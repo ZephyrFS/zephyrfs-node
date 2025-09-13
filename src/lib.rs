@@ -9,6 +9,7 @@ pub mod storage;
 pub mod protocol;
 pub mod node_manager;
 pub mod crypto;
+pub mod coordinator;
 
 pub use crypto::{
     ZephyrCrypto, CryptoParams, ScryptParams, AesParams, HashParams,

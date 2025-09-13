@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # ZephyrFS Coordinator
+  coordinator:
+    build:
+      context: ../zephyrfs-coordinator
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"  # gRPC port
+      - "8090:8090"  # HTTP API port
+      - "8091:8091"  # Metrics port
+    environment:
+      - LOG_LEVEL=debug
+    volumes:
+      - coordinator_data:/data
+    networks:
+      - zephyr_network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8091/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ZephyrFS Node 1
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      - ZEPHYR_COORDINATOR_URL=http://coordinator:8080
+      - ZEPHYR_P2P_PORT=4001
+      - ZEPHYR_API_PORT=8081
+      - ZEPHYR_NODE_ID=node-1
+      - LOG_LEVEL=debug
+    volumes:
+      - node1_data:/data
+    networks:
+      - zephyr_network
+
+  # ZephyrFS Node 2
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      - ZEPHYR_COORDINATOR_URL=http://coordinator:8080
+      - ZEPHYR_P2P_PORT=4002
+      - ZEPHYR_API_PORT=8082
+      - ZEPHYR_NODE_ID=node-2
+      - LOG_LEVEL=debug
+    volumes:
+      - node2_data:/data
+    networks:
+      - zephyr_network
+
+  # ZephyrFS Node 3
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      - ZEPHYR_COORDINATOR_URL=http://coordinator:8080
+      - ZEPHYR_P2P_PORT=4003
+      - ZEPHYR_API_PORT=8083
+      - ZEPHYR_NODE_ID=node-3
+      - LOG_LEVEL=debug
+    volumes:
+      - node3_data:/data
+    networks:
+      - zephyr_network
+
+volumes:
+  coordinator_data:
+  node1_data:
+  node2_data:
+  node3_data:
+
+networks:
+  zephyr_network:
+    driver: bridge

@@ -132,7 +132,7 @@ impl Default for StorageConfig {
 impl Default for CoordinatorConfig {
     fn default() -> Self {
         Self {
-            url: "http://localhost:9090".to_string(),
+            url: "http://localhost:8080".to_string(),
             timeout: 30,
             heartbeat_interval: 60,
         }

@@ -7,31 +7,35 @@ use tracing::{debug, info, warn, error};
 use crate::config::Config;
 use crate::network::{NetworkManager, message_handler::{ZephyrMessage, NodeInfo}};
 use crate::storage::{StorageManager, StorageConfig as StorageManagerConfig};
+use crate::coordinator::{CoordinatorManager, RegistrationStatus};
 
 /// Integrated node manager coordinating networking and storage
-/// 
+///
 /// Safety: Coordinates secure operations between network and storage layers
 /// Transparency: Provides comprehensive node status and metrics
 /// Privacy: Handles secure chunk distribution and encrypted metadata
 pub struct NodeManager {
     /// Network layer manager
     network_manager: NetworkManager,
-    
+
     /// Storage layer manager
     pub storage_manager: Arc<StorageManager>,
-    
+
+    /// Coordinator manager for network coordination
+    coordinator_manager: Option<CoordinatorManager>,
+
     /// Configuration
     config: Config,
-    
+
     /// Message channel from network to node manager
     message_rx: mpsc::Receiver<ZephyrMessage>,
-    
+
     /// Message channel from node manager to network
     message_tx: mpsc::Sender<ZephyrMessage>,
-    
+
     /// Node statistics
     node_stats: Arc<RwLock<NodeStats>>,
-    
+
     /// Base storage path
     storage_path: PathBuf,
 }
@@ -81,14 +85,14 @@ pub enum DistributionStrategy {
 
 impl NodeManager {
     /// Create a new integrated node manager
-    /// 
+    ///
     /// Safety: Initializes both network and storage with secure configurations
     pub async fn new(config: Config, storage_path: PathBuf) -> Result<Self> {
         info!("Initializing NodeManager with integrated network and storage");
-        
+
         // Create message channel for network-storage communication
         let (message_tx, message_rx) = mpsc::channel::<ZephyrMessage>(1000);
-        
+
         // Initialize storage manager
         let storage_config = StorageManagerConfig {
             max_capacity: config.storage.max_storage,
@@ -99,16 +103,33 @@ impl NodeManager {
             enable_gc: true,
             gc_interval: 3600, // 1 hour
         };
-        
+
         let storage_manager = Arc::new(
             StorageManager::new(&storage_path, storage_config).await
                 .context("Failed to initialize storage manager")?
         );
-        
+
         // Initialize network manager with message channel
         let network_manager = NetworkManager::new(config.clone()).await
             .context("Failed to initialize network manager")?;
-        
+
+        // Initialize coordinator manager if URL is provided
+        let coordinator_manager = if !config.coordinator.url.is_empty() {
+            match CoordinatorManager::new(config.coordinator.url.clone()).await {
+                Ok(manager) => {
+                    info!("Successfully connected to coordinator at {}", config.coordinator.url);
+                    Some(manager)
+                }
+                Err(e) => {
+                    warn!("Failed to connect to coordinator at {}: {}. Running in standalone mode.", config.coordinator.url, e);
+                    None
+                }
+            }
+        } else {
+            info!("No coordinator URL configured. Running in standalone mode.");
+            None
+        };
+
         let node_stats = Arc::new(RwLock::new(NodeStats {
             chunks_served: 0,
             chunks_retrieved: 0,
@@ -119,10 +140,11 @@ impl NodeManager {
             uptime_seconds: 0,
             start_time: std::time::Instant::now(),
         }));
-        
+
         Ok(Self {
             network_manager,
             storage_manager,
+            coordinator_manager,
             config,
             message_rx,
             message_tx,
@@ -132,21 +154,55 @@ impl NodeManager {
     }
     
     /// Start the integrated node
-    /// 
+    ///
     /// Safety: Starts both network and storage services with proper error handling
     pub async fn start(&mut self) -> Result<()> {
         info!("Starting integrated ZephyrFS node");
-        
+
         // Start storage manager background tasks (if any)
         self.start_storage_tasks().await?;
-        
+
         // Start network manager
         self.network_manager.start().await
             .context("Failed to start network manager")?;
-        
+
+        // Register with coordinator if available
+        if self.coordinator_manager.is_some() {
+            let node_status = self.get_node_status().await;
+            let addresses = vec![
+                format!("{}:{}", "127.0.0.1", self.config.network.p2p_port),
+                format!("{}:{}", "127.0.0.1", self.config.network.api_port),
+            ];
+
+            let mut capabilities = std::collections::HashMap::new();
+            capabilities.insert("version".to_string(), node_status.version);
+            capabilities.insert("storage".to_string(), "true".to_string());
+            capabilities.insert("encryption".to_string(), "true".to_string());
+
+            if let Some(coordinator) = self.coordinator_manager.as_mut() {
+                let response = coordinator.register_node(
+                    addresses,
+                    node_status.storage_capacity,
+                    capabilities,
+                ).await?;
+
+                if response.success {
+                    info!("Successfully registered with coordinator. Node ID: {}", coordinator.get_node_id());
+                    if !response.bootstrap_peers.is_empty() {
+                        info!("Received {} bootstrap peers from coordinator", response.bootstrap_peers.len());
+                        // TODO: Connect to bootstrap peers
+                    }
+                } else {
+                    warn!("Failed to register with coordinator: {}", response.message);
+                }
+            }
+
+            self.start_coordinator_heartbeat().await;
+        }
+
         // Start message processing loop
         self.start_message_processing().await;
-        
+
         info!("ZephyrFS node started successfully");
         Ok(())
     }
@@ -187,11 +243,16 @@ impl NodeManager {
             }
         }
         
+        // Register file with coordinator if available
+        if let Err(e) = self.register_file_with_coordinator(file_id, &file_hash, data.len() as u64, filename).await {
+            warn!("Failed to register file with coordinator: {}", e);
+        }
+
         // Announce file availability to peers
         if let Err(e) = self.announce_file_to_peers(file_id, &file_hash).await {
             warn!("Failed to announce file to peers: {}", e);
         }
-        
+
         info!("Successfully stored and distributed file: {} with hash: {}", file_id, file_hash);
         Ok(file_hash)
     }
@@ -268,8 +329,14 @@ impl NodeManager {
         // Calculate uptime
         let uptime_seconds = stats.start_time.elapsed().as_secs();
         
+        let node_id = if let Some(coordinator) = &self.coordinator_manager {
+            coordinator.get_node_id().to_string()
+        } else {
+            self.config.node_id.clone().unwrap_or_else(|| "local_node".to_string())
+        };
+
         NodeStatus {
-            node_id: "local_node".to_string(), // TODO: Generate proper node ID
+            node_id,
             version: env!("CARGO_PKG_VERSION").to_string(),
             uptime_seconds,
             peer_connections: stats.peer_connections,
@@ -287,18 +354,25 @@ impl NodeManager {
     }
     
     /// Shutdown the node gracefully
-    /// 
+    ///
     /// Safety: Ensures clean shutdown of both network and storage
     pub async fn shutdown(&mut self) -> Result<()> {
         info!("Shutting down ZephyrFS node");
-        
+
+        // Unregister from coordinator if connected
+        if let Some(coordinator) = &mut self.coordinator_manager {
+            if let Err(e) = coordinator.unregister_node(Some("Normal shutdown".to_string())).await {
+                warn!("Failed to unregister from coordinator: {}", e);
+            }
+        }
+
         // Shutdown network manager
         self.network_manager.shutdown().await
             .context("Failed to shutdown network manager")?;
-        
+
         // Storage manager cleanup (if needed)
         // Currently storage manager doesn't need explicit cleanup
-        
+
         info!("ZephyrFS node shutdown complete");
         Ok(())
     }
@@ -410,6 +484,134 @@ impl NodeManager {
         debug!("File announcement broadcast not yet implemented");
         
         Ok(())
+    }
+
+    /// Register this node with the coordinator
+    async fn register_with_coordinator(&self, coordinator: &mut CoordinatorManager) -> Result<()> {
+        info!("Registering node with coordinator");
+
+        let node_status = self.get_node_status().await;
+        let addresses = vec![
+            format!("{}:{}", "127.0.0.1", self.config.network.p2p_port),
+            format!("{}:{}", "127.0.0.1", self.config.network.api_port),
+        ];
+
+        let mut capabilities = std::collections::HashMap::new();
+        capabilities.insert("version".to_string(), node_status.version);
+        capabilities.insert("storage".to_string(), "true".to_string());
+        capabilities.insert("encryption".to_string(), "true".to_string());
+
+        let response = coordinator.register_node(
+            addresses,
+            node_status.storage_capacity,
+            capabilities,
+        ).await?;
+
+        if response.success {
+            info!("Successfully registered with coordinator. Node ID: {}", coordinator.get_node_id());
+            if !response.bootstrap_peers.is_empty() {
+                info!("Received {} bootstrap peers from coordinator", response.bootstrap_peers.len());
+                // TODO: Connect to bootstrap peers
+            }
+        } else {
+            warn!("Failed to register with coordinator: {}", response.message);
+        }
+
+        Ok(())
+    }
+
+    /// Start coordinator heartbeat loop
+    async fn start_coordinator_heartbeat(&self) {
+        if let Some(coordinator) = &self.coordinator_manager {
+            let node_stats = Arc::clone(&self.node_stats);
+            let storage_manager = Arc::clone(&self.storage_manager);
+
+            coordinator.start_heartbeat(move || {
+                let stats = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        let node_stats = node_stats.read().await;
+                        let capacity_info = storage_manager.get_capacity_info().await;
+                        let uptime = node_stats.start_time.elapsed().as_secs() as i64;
+
+                        crate::coordinator::types::NodeStats {
+                            storage_used: capacity_info.used_space as i64,
+                            storage_available: capacity_info.available_space as i64,
+                            chunks_stored: capacity_info.file_count as i64, // Approximation
+                            bandwidth_up: node_stats.bytes_sent as i64,
+                            bandwidth_down: node_stats.bytes_received as i64,
+                            cpu_usage: 0.0, // TODO: Implement CPU monitoring
+                            memory_usage: 0.0, // TODO: Implement memory monitoring
+                            uptime_seconds: uptime,
+                        }
+                    })
+                });
+                stats
+            }).await;
+
+            info!("Started coordinator heartbeat");
+        }
+    }
+
+    /// Register a file with the coordinator if available
+    async fn register_file_with_coordinator(&self, file_id: &str, file_hash: &str, file_size: u64, filename: &str) -> Result<()> {
+        if let Some(coordinator) = &self.coordinator_manager {
+            // Get file chunks from storage manager
+            let chunks = match self.storage_manager.get_file_chunks(file_id).await {
+                Ok(Some(chunk_list)) => {
+                    chunk_list.into_iter().enumerate().map(|(index, chunk_id)| {
+                        crate::coordinator::types::ChunkMetadata {
+                            chunk_id: chunk_id.clone(),
+                            hash: chunk_id, // For now, use chunk_id as hash
+                            size: self.config.storage.chunk_size as i64, // Default chunk size
+                            index: index as i32,
+                        }
+                    }).collect()
+                }
+                _ => Vec::new(),
+            };
+
+            let response = coordinator.register_file(
+                file_id.to_string(),
+                filename.to_string(),
+                file_size,
+                file_hash.to_string(),
+                chunks,
+            ).await?;
+
+            if response.success {
+                debug!("Successfully registered file {} with coordinator", file_id);
+                if !response.chunk_placements.is_empty() {
+                    debug!("Coordinator provided {} chunk placement recommendations", response.chunk_placements.len());
+                    // TODO: Handle chunk placement recommendations
+                }
+            } else {
+                warn!("Failed to register file with coordinator: {}", response.message);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Find chunk locations using coordinator
+    async fn find_chunk_locations_via_coordinator(&self, chunk_id: &str) -> Result<Vec<String>> {
+        if let Some(coordinator) = &self.coordinator_manager {
+            let response = coordinator.find_chunk_locations(chunk_id.to_string(), 3).await?;
+
+            if response.success {
+                debug!("Found {} locations for chunk {} via coordinator", response.node_addresses.len(), chunk_id);
+                Ok(response.node_addresses)
+            } else {
+                debug!("Coordinator couldn't find locations for chunk {}: {}", chunk_id, response.message);
+                Ok(Vec::new())
+            }
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    /// Get coordinator registration status
+    pub fn get_coordinator_status(&self) -> Option<&RegistrationStatus> {
+        self.coordinator_manager.as_ref().map(|c| c.get_registration_status())
     }
 }
 

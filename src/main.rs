@@ -9,6 +9,7 @@ mod storage;
 mod protocol;
 mod node_manager;
 mod crypto;
+mod coordinator;
 
 #[cfg(test)]
 mod integration_tests;

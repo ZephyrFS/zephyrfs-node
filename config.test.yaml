@@ -1,0 +1,25 @@
+# Test configuration for ZephyrFS Node
+network:
+  p2p_port: 4001
+  api_port: 8080
+  enable_mdns: true
+  bootstrap_peers: []
+  max_peers: 50
+  enable_nat_traversal: false  # Disabled for Docker testing
+
+storage:
+  data_dir: "/data"
+  max_storage: 1073741824  # 1GB
+  chunk_size: 1048576      # 1MB
+  encrypt_at_rest: true
+
+coordinator:
+  url: "http://coordinator:8080"
+  timeout: 30
+  heartbeat_interval: 10
+
+security:
+  strict_tls: false        # Disabled for local testing
+  min_peer_reputation: 0.0
+  max_unknown_peers: 10
+  enable_rate_limiting: false
