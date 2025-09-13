@@ -18,7 +18,7 @@ pub struct NodeManager {
     network_manager: NetworkManager,
     
     /// Storage layer manager
-    storage_manager: Arc<StorageManager>,
+    pub storage_manager: Arc<StorageManager>,
     
     /// Configuration
     config: Config,
