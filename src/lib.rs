@@ -22,6 +22,9 @@ pub mod proof;
 pub mod economics;
 pub mod allocation;
 
+// Phase 5.2: Smart Redundancy & Data Durability
+pub mod redundancy;
+
 pub use crypto::{
     ZephyrCrypto, CryptoParams, ScryptParams, AesParams, HashParams,
     ContentHasher, VerificationHasher, EncryptedData, ContentId, HashAlgorithm
@@ -57,4 +60,11 @@ pub use economics::{
 };
 pub use allocation::{
     DemocraticAllocationManager, AllocationStrategy, AllocationQuality
+};
+
+// Phase 5.2: Smart redundancy system exports
+pub use redundancy::{
+    IntelligentReplicationManager, GeographicOptimizer, ChunkHealthMonitor,
+    AutoReplicationManager, ReplicationStrategy, GeographicDistribution,
+    HealthStatus, ReplicationStatus
 };
