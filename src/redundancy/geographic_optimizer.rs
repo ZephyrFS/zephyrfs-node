@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, BTreeMap};
 use chrono::{DateTime, Utc, Duration};
 
-use crate::economics::GeographicRegion;
+use crate::economics::earnings_calculator::GeographicRegion;
 
 /// Geographic distribution optimizer
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -641,7 +641,7 @@ impl GeographicOptimizer {
 
         Ok(GeographicDistribution {
             selected_regions,
-            distribution_metrics,
+            distribution_metrics: distribution_metrics.clone(),
             compliance_status: ComplianceStatus::Compliant,
             optimization_score: distribution_metrics.overall_score,
             estimated_cost: distribution_metrics.total_cost,

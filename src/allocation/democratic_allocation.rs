@@ -194,7 +194,7 @@ pub struct NodeAllocation {
 }
 
 /// Allocation strategy used
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum AllocationStrategy {
     /// Capacity-based allocation
     CapacityBased,

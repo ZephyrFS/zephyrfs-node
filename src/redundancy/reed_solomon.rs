@@ -284,7 +284,7 @@ impl ReedSolomonCodec {
 
     /// Decode/reconstruct data from available chunks
     pub fn decode(&mut self, request: ReconstructionRequest) -> Result<ReconstructionResult> {
-        let start_time = std::time::Instant::now();
+        let start_time = crate::SerializableInstant::now();
 
         // Verify we have enough chunks for reconstruction
         if request.available_chunks.len() < self.config.data_chunks as usize {

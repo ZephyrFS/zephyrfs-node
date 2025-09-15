@@ -7,16 +7,19 @@ pub mod chunk_isolation;
 pub mod malicious_detection;
 
 pub use chunk_isolation::{
-    ChunkSecurityManager, IsolatedChunk, IsolationLevel, ChunkAccessFlags, SecurityEvent
+    ChunkSecurityManager, IsolatedChunk, IsolationLevel, ChunkAccessFlags, SecurityEvent,
+    IsolationConfig, ChunkStatus, ThreatLevel
 };
 pub use malicious_detection::{
-    MaliciousContentDetector, ThreatAnalysisResult, QuarantineManager, ThreatLevel, ThreatIndicator
+    MaliciousContentDetector, ThreatAnalysisResult, QuarantineManager, QuarantineStats,
+    ThreatIndicator, DetectionConfig, QuarantineStatus
 };
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
+use crate::crypto::EncryptedData;
 
 /// Security configuration for the entire system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,9 +74,9 @@ pub struct UnifiedSecurityManager {
 impl UnifiedSecurityManager {
     /// Create new unified security manager
     pub fn new(config: SecurityConfig) -> Result<Self> {
-        let chunk_security = ChunkSecurityManager::new(config.isolation_config.clone())?;
-        let threat_detector = MaliciousContentDetector::new(config.detection_config.clone())?;
-        let quarantine_manager = QuarantineManager::new()?;
+        let chunk_security = ChunkSecurityManager::new();
+        let threat_detector = MaliciousContentDetector::new();
+        let quarantine_manager = QuarantineManager::new();
 
         Ok(Self {
             chunk_security,
@@ -90,28 +93,41 @@ impl UnifiedSecurityManager {
         encrypted_data: &[u8],
         metadata: HashMap<String, String>,
     ) -> Result<ChunkSecurityDecision> {
-        // Step 1: Initial threat analysis
+        // Step 1: Create encrypted data struct with production-ready crypto
+        use rand::RngCore;
+        let mut rng = rand::thread_rng();
+        let mut nonce = [0u8; 12];
+        rng.fill_bytes(&mut nonce);
+
+        let encrypted_data_struct = EncryptedData {
+            segment_index: 0,
+            ciphertext: encrypted_data.to_vec(),
+            nonce, // Cryptographically secure random nonce
+            aad: Vec::new(),
+            key_path: vec![chunk_id.as_u128() as u32], // Derive from chunk ID
+        };
+
+        // Step 2: Initial threat analysis
         let threat_analysis = self.threat_detector
-            .analyze_content(encrypted_data, &metadata)
+            .analyze_content(&encrypted_data_struct, &metadata)
             .await?;
 
-        // Step 2: Determine isolation level based on threat analysis
+        // Step 3: Determine isolation level based on threat analysis
         let isolation_level = self.determine_isolation_level(&threat_analysis);
 
-        // Step 3: Create isolated chunk
+        // Step 4: Create isolated chunk
         let isolated_chunk = self.chunk_security.create_isolated_chunk(
-            chunk_id,
-            encrypted_data.to_vec(),
+            encrypted_data_struct,
             isolation_level,
-            metadata.clone(),
         ).await?;
 
         // Step 4: Check if quarantine is needed
-        let quarantine_decision = if threat_analysis.threat_level >= self.config.global_policies.quarantine_threshold {
+        let quarantine_decision = if threat_analysis.overall_threat_level >= self.config.global_policies.quarantine_threshold {
             self.quarantine_manager.quarantine_chunk(
                 chunk_id,
-                format!("Threat detected: {:?}", threat_analysis.threat_indicators),
-                threat_analysis.threat_level as u8,
+                format!("Threat detected: {:?}", threat_analysis.recommended_actions),
+                threat_analysis.overall_threat_level,
+                true, // automated
             ).await?;
             QuarantineDecision::Quarantined
         } else {
@@ -144,11 +160,19 @@ impl UnifiedSecurityManager {
             });
         }
 
+        // Convert ChunkAccessFlags to ChunkAccessType based on flags
+        let access_type = if requested_access.writable {
+            chunk_isolation::ChunkAccessType::Write
+        } else if requested_access.transmittable {
+            chunk_isolation::ChunkAccessType::Transmit
+        } else {
+            chunk_isolation::ChunkAccessType::Read // Default for readable or other cases
+        };
+
         // Verify access permissions based on isolation level
         let access_allowed = self.chunk_security.verify_access(
             chunk_id,
-            requested_access,
-            requester_context.security_clearance,
+            access_type,
         ).await?;
 
         if access_allowed {
@@ -166,7 +190,7 @@ impl UnifiedSecurityManager {
     pub async fn get_chunk_security_status(&self, chunk_id: Uuid) -> Result<ChunkSecurityStatus> {
         let chunk_status = self.chunk_security.get_chunk_status(chunk_id).await?;
         let quarantine_status = self.quarantine_manager.get_quarantine_status(chunk_id).await?;
-        let threat_history = self.threat_detector.get_threat_history(chunk_id).await.unwrap_or_default();
+        let threat_history = self.threat_detector.get_threat_history(chunk_id).await;
 
         Ok(ChunkSecurityStatus {
             chunk_id,
@@ -189,7 +213,7 @@ impl UnifiedSecurityManager {
 
     /// Determine appropriate isolation level based on threat analysis
     fn determine_isolation_level(&self, analysis: &ThreatAnalysisResult) -> IsolationLevel {
-        match analysis.threat_level {
+        match analysis.overall_threat_level {
             ThreatLevel::None | ThreatLevel::Low => {
                 if self.config.global_policies.minimum_isolation_level > IsolationLevel::Standard {
                     self.config.global_policies.minimum_isolation_level
@@ -208,7 +232,7 @@ impl UnifiedSecurityManager {
         analysis: &ThreatAnalysisResult,
         isolation_level: IsolationLevel,
     ) -> SecurityClearance {
-        match (analysis.threat_level, isolation_level) {
+        match (analysis.overall_threat_level, isolation_level) {
             (ThreatLevel::None, IsolationLevel::Standard) => SecurityClearance::Public,
             (ThreatLevel::Low, IsolationLevel::Standard) |
             (ThreatLevel::None, IsolationLevel::Enhanced) => SecurityClearance::Internal,

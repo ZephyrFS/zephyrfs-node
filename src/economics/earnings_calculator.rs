@@ -7,7 +7,34 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use chrono::{DateTime, Utc, Duration};
 
-use super::token_model::{RewardReason, NetworkHealthMetrics};
+// Moved from legacy token_model for backward compatibility
+
+/// Reason for reward calculation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RewardReason {
+    StorageContribution,
+    UptimeBonus,
+    PerformanceBonus,
+    GeographicBonus,
+    NetworkHealthBonus,
+}
+
+/// Network health metrics for earnings calculation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkHealthMetrics {
+    pub total_storage_tb: f64,
+    pub total_capacity_gb: f64,
+    pub active_nodes: u32,
+    pub active_volunteers: u32,
+    pub average_uptime_percentage: f64,
+    pub average_uptime: f64,
+    pub network_utilization_percentage: f64,
+    pub utilization_rate: f64,
+    pub geographic_distribution_score: f64,
+    pub geographic_diversity: f64,
+    pub data_redundancy_factor: f64,
+    pub data_durability: f64,
+}
 
 /// Real-time earnings calculator for volunteers
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,7 +125,7 @@ pub struct TenureTier {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GeographicRegion {
     NorthAmerica,
     Europe,
@@ -218,11 +245,17 @@ impl EarningsCalculator {
             bonuses: BonusStructure::default(),
             performance_history: HashMap::new(),
             network_metrics: NetworkHealthMetrics {
-                total_capacity_gb: 0,
+                total_storage_tb: 0.0,
+                total_capacity_gb: 0.0,
+                active_nodes: 0,
                 active_volunteers: 0,
-                utilization_rate: 0.0,
+                average_uptime_percentage: 0.0,
                 average_uptime: 0.0,
+                network_utilization_percentage: 0.0,
+                utilization_rate: 0.0,
+                geographic_distribution_score: 0.0,
                 geographic_diversity: 0.0,
+                data_redundancy_factor: 0.0,
                 data_durability: 0.0,
             },
             daily_earnings: HashMap::new(),

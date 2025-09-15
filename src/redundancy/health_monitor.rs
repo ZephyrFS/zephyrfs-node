@@ -9,7 +9,7 @@ use std::collections::{HashMap, VecDeque, BTreeMap};
 use chrono::{DateTime, Utc, Duration};
 use tokio::time::{sleep, Duration as TokioDuration};
 
-use crate::economics::GeographicRegion;
+use crate::economics::earnings_calculator::GeographicRegion;
 
 /// Real-time chunk health monitoring system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,7 +59,7 @@ pub struct ReplicaHealth {
     pub connectivity_status: ConnectivityStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum HealthStatus {
     Excellent,   // All replicas healthy, high durability
     Good,        // Most replicas healthy, adequate durability
@@ -451,7 +451,7 @@ impl ChunkHealthMonitor {
         self.chunk_health.insert(chunk_id.clone(), chunk_health);
 
         // Schedule health check
-        self.schedule_health_check(chunk_id, Utc::now() + self.get_check_interval(&health_status));
+        self.schedule_health_check(chunk_id.clone(), Utc::now() + self.get_check_interval(&health_status));
 
         // Initialize health history
         self.health_history.insert(chunk_id, VecDeque::with_capacity(1000));
@@ -461,15 +461,19 @@ impl ChunkHealthMonitor {
 
     /// Perform health check on a chunk
     pub async fn perform_health_check(&mut self, chunk_id: &str) -> Result<HealthCheckResult> {
-        let chunk_health = self.chunk_health.get_mut(chunk_id)
-            .ok_or_else(|| anyhow::anyhow!("Chunk not found in monitoring"))?;
+        // First, collect replica information without holding a mutable reference
+        let mut replicas_to_check = {
+            let chunk_health = self.chunk_health.get(chunk_id)
+                .ok_or_else(|| anyhow::anyhow!("Chunk not found in monitoring"))?;
+            chunk_health.replica_health.clone()
+        };
 
         let mut check_results = Vec::new();
         let mut healthy_replicas = 0;
         let mut total_response_time = 0.0;
 
         // Check each replica
-        for replica in &mut chunk_health.replica_health {
+        for replica in replicas_to_check.iter_mut() {
             let replica_result = self.check_replica_health(replica).await?;
 
             if matches!(replica_result.status, ReplicaStatus::Healthy) {
@@ -480,28 +484,41 @@ impl ChunkHealthMonitor {
             check_results.push(replica_result);
         }
 
-        // Update chunk health based on check results
-        let new_health_score = self.calculate_chunk_health_score(&chunk_health.replica_health);
-        let new_health_status = self.determine_health_status(new_health_score, &chunk_health.replica_health);
+        // Compute new values outside of mutable borrow scope
+        let new_health_score = self.calculate_chunk_health_score(&replicas_to_check);
+        let new_health_status = self.determine_health_status(new_health_score, &replicas_to_check);
+        let avg_response_time = total_response_time / check_results.len() as f64;
+        let success_rate = (healthy_replicas as f64 / check_results.len() as f64) * 100.0;
+        let now = Utc::now();
+        let next_check_due = now + self.get_check_interval(&new_health_status);
 
-        chunk_health.overall_health = new_health_status.clone();
-        chunk_health.availability_score = new_health_score;
-        chunk_health.performance_metrics.avg_response_time_ms = total_response_time / check_results.len() as f64;
-        chunk_health.performance_metrics.success_rate = (healthy_replicas as f64 / check_results.len() as f64) * 100.0;
-        chunk_health.last_verified = Utc::now();
-        chunk_health.next_check_due = Utc::now() + self.get_check_interval(&new_health_status);
+        // Now update chunk health with computed values
+        let risk_factors = {
+            let mut chunk_health = self.chunk_health.get_mut(chunk_id)
+                .ok_or_else(|| anyhow::anyhow!("Chunk not found in monitoring"))?;
 
-        // Update risk factors
-        chunk_health.risk_factors = self.assess_risk_factors(chunk_health);
+            chunk_health.overall_health = new_health_status.clone();
+            chunk_health.availability_score = new_health_score;
+            chunk_health.performance_metrics.avg_response_time_ms = avg_response_time;
+            chunk_health.performance_metrics.success_rate = success_rate;
+            chunk_health.last_verified = now;
+            chunk_health.next_check_due = next_check_due;
 
-        // Record health snapshot
-        self.record_health_snapshot(chunk_id, chunk_health);
+            // Assess risk factors and clone them before the borrow ends
+            let risk_factors = self.assess_risk_factors(&*chunk_health);
+            chunk_health.risk_factors = risk_factors.clone();
+
+            self.record_health_snapshot(chunk_id, &*chunk_health);
+
+            risk_factors
+        };
 
         // Schedule next check
-        self.schedule_health_check(chunk_id.to_string(), chunk_health.next_check_due);
+        self.schedule_health_check(chunk_id.to_string(), next_check_due);
 
         // Check for alerts
         if self.alert_config.enable_alerts {
+            let chunk_health = self.chunk_health.get(chunk_id).unwrap();
             self.check_alert_conditions(chunk_id, chunk_health).await?;
         }
 
@@ -512,14 +529,14 @@ impl ChunkHealthMonitor {
             health_status: new_health_status,
             health_score: new_health_score,
             replica_results: check_results,
-            issues_detected: chunk_health.risk_factors.clone(),
-            recommendations: self.generate_recommendations(chunk_health),
+            issues_detected: risk_factors,
+            recommendations: self.generate_recommendations(&self.chunk_health.get(chunk_id).unwrap()),
         })
     }
 
     /// Check individual replica health
     async fn check_replica_health(&mut self, replica: &mut ReplicaHealth) -> Result<ReplicaCheckResult> {
-        let start_time = std::time::Instant::now();
+        let start_time = crate::SerializableInstant::now();
 
         // Simulate health check (in real implementation, this would be actual network calls)
         let connectivity_check = self.check_replica_connectivity(&replica.node_id).await?;

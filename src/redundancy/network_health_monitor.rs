@@ -4,11 +4,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkHealthReport {
-    pub timestamp: Instant,
+    pub timestamp: crate::SerializableInstant,
     pub overall_health_score: f32, // 0.0 to 1.0
     pub critical_alerts: Vec<HealthAlert>,
     pub warnings: Vec<HealthAlert>,
@@ -26,7 +26,7 @@ pub struct HealthAlert {
     pub message: String,
     pub affected_nodes: Vec<String>,
     pub affected_regions: Vec<String>,
-    pub first_detected: Instant,
+    pub first_detected: crate::SerializableInstant,
     pub estimated_impact: ImpactAssessment,
     pub recommended_actions: Vec<String>,
 }
@@ -141,7 +141,7 @@ pub struct TrendIndicator {
 pub struct PredictedIssue {
     pub issue_type: AlertType,
     pub probability: f32,
-    pub predicted_time: Instant,
+    pub predicted_time: crate::SerializableInstant,
     pub potential_impact: ImpactAssessment,
     pub prevention_actions: Vec<String>,
 }
@@ -187,7 +187,7 @@ pub struct NetworkHealthMonitor {
 #[derive(Debug, Clone)]
 struct NodeHealthStatus {
     node_id: String,
-    last_seen: Instant,
+    last_seen: crate::SerializableInstant,
     health_score: f32,
     metrics: NodeMetrics,
     status: NodeStatus,
@@ -217,7 +217,7 @@ struct RegionalMonitor {
     nodes: Vec<String>,
     health_score_history: VecDeque<f32>,
     connectivity_matrix: HashMap<String, HashMap<String, Duration>>,
-    last_health_check: Instant,
+    last_health_check: crate::SerializableInstant,
 }
 
 #[derive(Debug, Clone)]
@@ -240,7 +240,7 @@ struct HealthPredictionModel {
 
 #[derive(Debug, Clone)]
 struct HealthDataPoint {
-    timestamp: Instant,
+    timestamp: crate::SerializableInstant,
     metrics: Vec<f32>,
     outcome: Option<AlertType>,
 }
@@ -258,7 +258,7 @@ impl NetworkHealthMonitor {
     }
 
     pub async fn perform_health_check(&mut self) -> NetworkHealthReport {
-        let timestamp = Instant::now();
+        let timestamp = crate::SerializableInstant::now();
 
         // Update node health status
         self.update_node_health_status().await;
@@ -339,7 +339,7 @@ impl NetworkHealthMonitor {
 
     async fn update_node_health_status(&mut self) {
         // Placeholder: In reality, this would collect metrics from all nodes
-        let now = Instant::now();
+        let now = crate::SerializableInstant::now();
 
         for node_id in ["node1", "node2", "node3"].iter() {
             let health_status = NodeHealthStatus {
@@ -603,14 +603,14 @@ impl NetworkHealthMonitor {
         // Check for critical node failures
         if metrics.offline_nodes > metrics.total_nodes / 4 {
             let alert = HealthAlert {
-                id: format!("critical_node_failures_{}", Instant::now().elapsed().as_secs()),
+                id: format!("critical_node_failures_{}", crate::SerializableInstant::now().elapsed().as_secs()),
                 severity: AlertSeverity::Critical,
                 alert_type: AlertType::NodeFailures,
                 message: format!("{} nodes are offline ({}% of network)", metrics.offline_nodes,
                     (metrics.offline_nodes as f32 / metrics.total_nodes as f32 * 100.0) as u32),
                 affected_nodes: vec!["multiple".to_string()],
                 affected_regions: regional_health.keys().cloned().collect(),
-                first_detected: Instant::now(),
+                first_detected: crate::SerializableInstant::now(),
                 estimated_impact: ImpactAssessment {
                     affected_data_percentage: metrics.offline_nodes as f32 / metrics.total_nodes as f32,
                     performance_impact: 0.8,
@@ -631,13 +631,13 @@ impl NetworkHealthMonitor {
         let storage_utilization = metrics.used_storage_capacity as f32 / metrics.total_storage_capacity as f32;
         if storage_utilization > 0.9 {
             let alert = HealthAlert {
-                id: format!("storage_capacity_{}", Instant::now().elapsed().as_secs()),
+                id: format!("storage_capacity_{}", crate::SerializableInstant::now().elapsed().as_secs()),
                 severity: AlertSeverity::High,
                 alert_type: AlertType::StorageCapacity,
                 message: format!("Network storage is {}% full", (storage_utilization * 100.0) as u32),
                 affected_nodes: vec!["all".to_string()],
                 affected_regions: regional_health.keys().cloned().collect(),
-                first_detected: Instant::now(),
+                first_detected: crate::SerializableInstant::now(),
                 estimated_impact: ImpactAssessment {
                     affected_data_percentage: 1.0,
                     performance_impact: 0.6,
@@ -657,14 +657,14 @@ impl NetworkHealthMonitor {
         // Check network performance
         if metrics.network_latency_p95 > Duration::from_millis(1000) {
             let alert = HealthAlert {
-                id: format!("network_latency_{}", Instant::now().elapsed().as_secs()),
+                id: format!("network_latency_{}", crate::SerializableInstant::now().elapsed().as_secs()),
                 severity: AlertSeverity::Medium,
                 alert_type: AlertType::PerformanceDegradation,
                 message: format!("Network latency is high: {}ms (95th percentile)",
                     metrics.network_latency_p95.as_millis()),
                 affected_nodes: vec!["multiple".to_string()],
                 affected_regions: regional_health.keys().cloned().collect(),
-                first_detected: Instant::now(),
+                first_detected: crate::SerializableInstant::now(),
                 estimated_impact: ImpactAssessment {
                     affected_data_percentage: 0.0,
                     performance_impact: 0.7,
@@ -724,7 +724,7 @@ impl NetworkHealthMonitor {
             Some(PredictedIssue {
                 issue_type: AlertType::PerformanceDegradation,
                 probability: 0.6,
-                predicted_time: Instant::now() + time_horizon,
+                predicted_time: crate::SerializableInstant::now() + time_horizon,
                 potential_impact: ImpactAssessment {
                     affected_data_percentage: 0.3,
                     performance_impact: 0.5,

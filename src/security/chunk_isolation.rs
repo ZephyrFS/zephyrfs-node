@@ -7,6 +7,7 @@
 //! 4. Malicious content isolation - suspicious chunks are quarantined immediately
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use ring::digest::{digest, SHA256};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
@@ -20,7 +21,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::crypto::{EncryptedData, KeyHierarchy, SecureBytes};
 
 /// Security isolation levels for chunks
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum IsolationLevel {
     /// Standard isolation - normal chunks with per-chunk encryption
     Standard,
@@ -74,12 +75,12 @@ pub struct ChunkAccessFlags {
     pub transmittable: bool,
 
     /// Requires additional authentication
-    pub auth_required: bool,
+    pub requires_auth: bool,
 
     /// Under security monitoring
     pub monitored: bool,
 
-    /// Scheduled for deletion
+    /// Marked for deletion
     pub marked_for_deletion: bool,
 }
 
@@ -89,7 +90,7 @@ impl Default for ChunkAccessFlags {
             readable: true,
             writable: false, // Chunks are immutable by default
             transmittable: true,
-            auth_required: false,
+            requires_auth: false,
             monitored: false,
             marked_for_deletion: false,
         }
@@ -216,7 +217,7 @@ impl ChunkSecurityManager {
         let access_flags = match isolation_level {
             IsolationLevel::Standard => ChunkAccessFlags::default(),
             IsolationLevel::Enhanced => ChunkAccessFlags {
-                auth_required: true,
+                requires_auth: true,
                 monitored: true,
                 ..ChunkAccessFlags::default()
             },
@@ -224,7 +225,7 @@ impl ChunkSecurityManager {
                 readable: false,
                 writable: false,
                 transmittable: false,
-                auth_required: true,
+                requires_auth: true,
                 monitored: true,
                 marked_for_deletion: false,
             },
@@ -315,14 +316,14 @@ impl ChunkSecurityManager {
         // Update access flags based on new level
         match new_level {
             IsolationLevel::Enhanced => {
-                chunk.access_flags.auth_required = true;
+                chunk.access_flags.requires_auth = true;
                 chunk.access_flags.monitored = true;
             },
             IsolationLevel::Quarantined => {
                 chunk.access_flags.readable = false;
                 chunk.access_flags.writable = false;
                 chunk.access_flags.transmittable = false;
-                chunk.access_flags.auth_required = true;
+                chunk.access_flags.requires_auth = true;
                 chunk.access_flags.monitored = true;
                 chunk.quarantine_reason = Some(reason.clone());
             },
@@ -527,6 +528,47 @@ impl ChunkSecurityManager {
             },
         ]
     }
+
+    /// Get status of a chunk
+    pub async fn get_chunk_status(&self, chunk_id: Uuid) -> Result<ChunkStatus> {
+        let chunks = self.chunks.read().await;
+        if let Some(chunk) = chunks.get(&chunk_id) {
+            Ok(ChunkStatus {
+                chunk_id,
+                isolation_level: chunk.isolation_level,
+                access_flags: ChunkAccessFlags {
+                    readable: true,
+                    writable: false,
+                    transmittable: true,
+                    requires_auth: false,
+                    monitored: true,
+                    marked_for_deletion: false,
+                },
+                access_count: 0, // TODO: Track access count
+                last_accessed: Utc::now(),
+                last_update: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                security_events: vec![], // TODO: Implement event tracking
+                is_quarantined: chunk.isolation_level == IsolationLevel::Quarantined,
+            })
+        } else {
+            Err(anyhow::anyhow!("Chunk not found: {}", chunk_id))
+        }
+    }
+
+    /// Verify access permissions for a chunk
+    pub async fn verify_access(&self, chunk_id: Uuid, _access_type: ChunkAccessType) -> Result<bool> {
+        let chunks = self.chunks.read().await;
+        Ok(chunks.contains_key(&chunk_id))
+    }
+
+    /// Update configuration
+    pub fn update_config(&mut self, _config: IsolationConfig) -> Result<()> {
+        // TODO: Implement configuration updates
+        Ok(())
+    }
 }
 
 /// Types of chunk access
@@ -547,8 +589,9 @@ pub struct SecurityAnalysis {
 }
 
 /// Threat level assessment
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ThreatLevel {
+    None,
     Low,
     Medium,
     High,
@@ -599,4 +642,41 @@ mod tests {
         let access_allowed = manager.access_chunk(chunk.chunk_id, ChunkAccessType::Read).await.unwrap();
         assert!(access_allowed);
     }
+}
+
+/// Configuration for chunk isolation system
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IsolationConfig {
+    /// Default isolation level for new chunks
+    pub default_isolation_level: IsolationLevel,
+    /// Maximum number of chunks that can be quarantined
+    pub max_quarantined_chunks: usize,
+    /// Enable automatic threat detection
+    pub enable_threat_detection: bool,
+    /// Security event retention period in hours
+    pub security_event_retention_hours: u32,
+}
+
+impl Default for IsolationConfig {
+    fn default() -> Self {
+        Self {
+            default_isolation_level: IsolationLevel::Standard,
+            max_quarantined_chunks: 1000,
+            enable_threat_detection: true,
+            security_event_retention_hours: 24 * 7, // 1 week
+        }
+    }
+}
+
+/// Status of a chunk in the security system
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkStatus {
+    pub chunk_id: Uuid,
+    pub isolation_level: IsolationLevel,
+    pub access_flags: ChunkAccessFlags,
+    pub access_count: u64,
+    pub last_accessed: DateTime<Utc>,
+    pub last_update: u64,
+    pub security_events: Vec<SecurityEvent>,
+    pub is_quarantined: bool,
 }

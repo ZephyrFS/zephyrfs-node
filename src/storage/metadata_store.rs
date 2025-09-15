@@ -113,7 +113,15 @@ impl MetadataStore {
     }
     
     /// Retrieve file metadata with integrity verification
-    /// 
+    ///
+    /// Safety: Verifies checksum before returning metadata
+    /// Transparency: Cache hits/misses are tracked and logged
+    pub async fn get_file(&self, file_id: &str) -> Result<Option<FileMetadata>> {
+        self.get_metadata(file_id).await
+    }
+
+    /// Retrieve file metadata with integrity verification (internal method)
+    ///
     /// Safety: Verifies checksum before returning metadata
     /// Transparency: Cache hits/misses are tracked and logged
     pub async fn get_metadata(&self, file_id: &str) -> Result<Option<FileMetadata>> {

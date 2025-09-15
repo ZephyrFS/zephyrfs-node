@@ -1,21 +1,21 @@
 //! Economics Module
 //!
-//! Complete economic system for ZephyrFS including token economics, payments, and rewards
+//! Contribution-based resource allocation and management system for ZephyrFS.
+//! Provides fair, cooperative resource sharing based on storage contributions
+//! rather than monetary payments.
 
-pub mod token_model;
-pub mod zephyr_coin;
-pub mod network_health_minter;
-pub mod market_maker;
+pub mod contribution_tracker;
+pub mod contribution_manager;
 pub mod earnings_calculator;
-pub mod payment_processor;
-pub mod payout_scheduler;
-pub mod performance_rewards;
 
-pub use token_model::{TokenEconomicsManager, TokenEconomics, NetworkHealthMetrics, RewardReason};
-pub use zephyr_coin::{ZephyrCoin, TokenEvent};
-pub use network_health_minter::{NetworkHealthController, HealthBasedMinter};
-pub use market_maker::{ZephyrCoinAMM, TradingPair, Currency as AMMCurrency};
-pub use earnings_calculator::{EarningsCalculator, VolunteerMetrics, EarningsProjection};
-pub use payment_processor::{PaymentProcessor, PaymentRequest, Currency, PaymentMethod};
-pub use payout_scheduler::{PayoutScheduler, PayoutPreferences, PayoutFrequency};
-pub use performance_rewards::{PerformanceRewardsSystem, PerformanceScore, Achievement, RewardTier};
+// Core contribution-based resource management exports
+pub use contribution_tracker::{
+    ContributionTracker, UserContribution, NetworkContributionStats, ContributionConfig,
+    PriorityLevel, AccountStatus
+};
+pub use contribution_manager::{
+    ContributionEconomicManager, SimpleReferralTracker
+};
+
+// Legacy compatibility exports (for geographic regions and volunteer metrics)
+pub use earnings_calculator::{VolunteerMetrics, NetworkHealthMetrics};

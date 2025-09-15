@@ -386,15 +386,15 @@ impl UnifiedProofManager {
     ) -> OverallVerificationResult {
         let storage_valid = storage_verification.is_valid;
         let additional_all_valid = additional_verifications.values().all(|&v| v);
-        let aggregation_valid = aggregation_verification.unwrap_or(true);
+        let aggregation_valid = aggregation_verification.unwrap_or(&true);
 
-        let overall_valid = storage_valid && additional_all_valid && aggregation_valid;
+        let overall_valid = storage_valid && additional_all_valid && *aggregation_valid;
 
         let confidence = if overall_valid {
             (storage_verification.confidence_score +
                 additional_verifications.values().filter(|&&v| v).count() as f64 /
                 additional_verifications.len().max(1) as f64 +
-                if aggregation_valid { 1.0 } else { 0.0 }) / 3.0
+                if *aggregation_valid { 1.0 } else { 0.0 }) / 3.0
         } else {
             0.0
         };

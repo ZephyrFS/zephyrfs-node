@@ -182,12 +182,13 @@ impl UnifiedAuditManager {
 
         let additional_metrics = self.calculate_additional_metrics(&base_report);
         let privacy_summary = self.generate_privacy_summary(period_start, period_end);
+        let report_integrity_hash = self.calculate_report_hash(&base_report)?;
 
         Ok(EnhancedTransparencyReport {
             base_report,
             additional_metrics,
             privacy_summary,
-            report_integrity_hash: self.calculate_report_hash(&base_report)?,
+            report_integrity_hash,
         })
     }
 
@@ -237,12 +238,13 @@ impl UnifiedAuditManager {
 
     /// Send alerts to registered handlers
     async fn send_alerts(&self, event: AuditEventType) -> Result<()> {
+        let severity = self.determine_alert_severity(&event);
         let alert = AuditAlert {
             event,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs(),
-            severity: self.determine_alert_severity(&event),
+            severity,
         };
 
         for handler in &self.alert_handlers {

@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeReputation {
@@ -14,7 +14,7 @@ pub struct NodeReputation {
     pub performance_metrics: PerformanceMetrics,
     pub historical_events: Vec<ReputationEvent>,
     pub reputation_trend: ReputationTrend,
-    pub last_updated: Instant,
+    pub last_updated: crate::SerializableInstant,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,7 +39,7 @@ pub struct PerformanceMetrics {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReputationEvent {
-    pub timestamp: Instant,
+    pub timestamp: crate::SerializableInstant,
     pub event_type: EventType,
     pub impact: f32, // -1.0 to +1.0
     pub details: String,
@@ -104,7 +104,7 @@ struct ReputationWeights {
 
 #[derive(Debug, Clone)]
 struct PerformanceSnapshot {
-    timestamp: Instant,
+    timestamp: crate::SerializableInstant,
     metrics: PerformanceMetrics,
     events: Vec<ReputationEvent>,
 }
@@ -130,7 +130,7 @@ impl ReputationManager {
 
     pub async fn update_node_performance(&mut self, node_id: &str, metrics: PerformanceMetrics) {
         let snapshot = PerformanceSnapshot {
-            timestamp: Instant::now(),
+            timestamp: crate::SerializableInstant::now(),
             metrics,
             events: Vec::new(),
         };
@@ -139,7 +139,7 @@ impl ReputationManager {
         history.push(snapshot);
 
         // Keep only last 30 days of data
-        let cutoff = Instant::now() - Duration::from_secs(30 * 24 * 3600);
+        let cutoff = crate::SerializableInstant::now() - Duration::from_secs(30 * 24 * 3600);
         history.retain(|s| s.timestamp > cutoff);
 
         // Update reputation based on new performance data
@@ -222,7 +222,7 @@ impl ReputationManager {
             performance_metrics,
             historical_events: self.get_recent_events(history, Duration::from_secs(7 * 24 * 3600)),
             reputation_trend: trend,
-            last_updated: Instant::now(),
+            last_updated: crate::SerializableInstant::now(),
         };
 
         self.node_reputations.insert(node_id.to_string(), reputation);
@@ -341,7 +341,7 @@ impl ReputationManager {
     }
 
     fn calculate_recent_events_impact(&self, history: &[PerformanceSnapshot]) -> f32 {
-        let cutoff = Instant::now() - Duration::from_secs(7 * 24 * 3600); // Last 7 days
+        let cutoff = crate::SerializableInstant::now() - Duration::from_secs(7 * 24 * 3600); // Last 7 days
 
         let recent_events: Vec<_> = history.iter()
             .flat_map(|s| &s.events)
@@ -442,7 +442,7 @@ impl ReputationManager {
     }
 
     fn get_recent_events(&self, history: &[PerformanceSnapshot], window: Duration) -> Vec<ReputationEvent> {
-        let cutoff = Instant::now() - window;
+        let cutoff = crate::SerializableInstant::now() - window;
         history.iter()
             .flat_map(|s| &s.events)
             .filter(|e| e.timestamp > cutoff)

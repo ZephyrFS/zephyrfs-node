@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeMetrics {
@@ -14,7 +14,7 @@ pub struct NodeMetrics {
     pub storage_usage: f32,
     pub bandwidth_utilization: f32,
     pub error_rate: f32,
-    pub last_failure: Option<Instant>,
+    pub last_failure: Option<crate::SerializableInstant>,
     pub hardware_health: HardwareHealth,
     pub geographic_risk: GeographicRisk,
     pub network_stability: NetworkStability,
@@ -48,7 +48,7 @@ pub struct NetworkStability {
 pub struct FailurePrediction {
     pub node_id: String,
     pub failure_probability: f32,
-    pub predicted_failure_time: Option<Instant>,
+    pub predicted_failure_time: Option<crate::SerializableInstant>,
     pub confidence_score: f32,
     pub risk_factors: Vec<RiskFactor>,
     pub recommended_actions: Vec<RecommendedAction>,
@@ -65,7 +65,7 @@ pub enum RiskFactor {
     PerformanceDegradation,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RecommendedAction {
     MigrateChunksImmediately,
     IncreaseRedundancy,
@@ -87,7 +87,7 @@ struct PredictionModel {
     weights: Vec<f32>,
     bias: f32,
     accuracy: f32,
-    last_updated: Instant,
+    last_updated: crate::SerializableInstant,
 }
 
 #[derive(Debug, Clone)]
@@ -106,7 +106,7 @@ struct FeatureWeights {
 struct TrainingExample {
     features: Vec<f32>,
     outcome: bool, // true if node failed
-    timestamp: Instant,
+    timestamp: crate::SerializableInstant,
 }
 
 impl MLPredictor {
@@ -137,7 +137,7 @@ impl MLPredictor {
                 self.training_data.push(TrainingExample {
                     features,
                     outcome: true,
-                    timestamp: Instant::now(),
+                    timestamp: crate::SerializableInstant::now(),
                 });
             }
         }
@@ -165,11 +165,11 @@ impl MLPredictor {
         let recommended_actions = self.generate_recommendations(failure_probability, &risk_factors);
 
         let predicted_failure_time = if failure_probability > 0.7 {
-            Some(Instant::now() + Duration::from_secs(3600)) // 1 hour
+            Some(crate::SerializableInstant::now() + Duration::from_secs(3600)) // 1 hour
         } else if failure_probability > 0.5 {
-            Some(Instant::now() + Duration::from_secs(7200)) // 2 hours
+            Some(crate::SerializableInstant::now() + Duration::from_secs(7200)) // 2 hours
         } else {
-            Some(Instant::now() + Duration::from_secs(14400)) // 4 hours
+            Some(crate::SerializableInstant::now() + Duration::from_secs(14400)) // 4 hours
         };
 
         Some(FailurePrediction {
@@ -326,7 +326,7 @@ impl MLPredictor {
                 weights: vec![0.1; 8], // Initialize with small weights
                 bias: 0.0,
                 accuracy: 0.5,
-                last_updated: Instant::now(),
+                last_updated: crate::SerializableInstant::now(),
             };
 
             // Simple gradient descent training
@@ -448,7 +448,7 @@ struct ChunkMigrationTask {
     source_nodes: Vec<String>,
     target_nodes: Vec<String>,
     priority: u8, // 1-10, higher is more urgent
-    deadline: Instant,
+    deadline: crate::SerializableInstant,
     estimated_transfer_time: Duration,
 }
 
@@ -463,8 +463,8 @@ struct MigrationProgress {
     task: ChunkMigrationTask,
     bytes_transferred: u64,
     total_bytes: u64,
-    start_time: Instant,
-    estimated_completion: Instant,
+    start_time: crate::SerializableInstant,
+    estimated_completion: crate::SerializableInstant,
 }
 
 #[derive(Debug, Clone)]
@@ -519,7 +519,7 @@ impl ProactiveReplicationManager {
                 source_nodes: vec![node_id.to_string()],
                 target_nodes: self.select_migration_targets(2, Some(node_id)).await?,
                 priority: 10, // Highest priority
-                deadline: Instant::now() + Duration::from_secs(1800), // 30 minutes
+                deadline: crate::SerializableInstant::now() + Duration::from_secs(1800), // 30 minutes
                 estimated_transfer_time: Duration::from_secs(300), // 5 minutes estimate
             };
 
@@ -545,7 +545,7 @@ impl ProactiveReplicationManager {
                 source_nodes: vec![node_id.to_string()],
                 target_nodes: self.select_migration_targets(1, Some(node_id)).await?,
                 priority,
-                deadline: Instant::now() + Duration::from_secs(7200), // 2 hours
+                deadline: crate::SerializableInstant::now() + Duration::from_secs(7200), // 2 hours
                 estimated_transfer_time: Duration::from_secs(600), // 10 minutes estimate
             };
 
@@ -623,15 +623,16 @@ impl ProactiveReplicationManager {
             task: task.clone(),
             bytes_transferred: 0,
             total_bytes: 1024 * 1024, // 1MB estimate
-            start_time: Instant::now(),
-            estimated_completion: Instant::now() + task.estimated_transfer_time,
+            start_time: crate::SerializableInstant::now(),
+            estimated_completion: crate::SerializableInstant::now() + task.estimated_transfer_time,
         };
 
+        let chunk_id = task.chunk_id.clone();
         self.migration_scheduler.active_migrations.insert(task.chunk_id, progress);
 
         // Placeholder: In reality, this would initiate the actual transfer
         println!("Starting migration of chunk {} from {:?} to {:?}",
-                task.chunk_id, task.source_nodes, task.target_nodes);
+                chunk_id, task.source_nodes, task.target_nodes);
 
         Ok(())
     }

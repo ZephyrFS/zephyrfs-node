@@ -11,6 +11,8 @@ pub mod recovery_optimizer;
 pub mod predictive_replication;
 pub mod reputation_system;
 pub mod network_health_monitor;
+pub mod contribution_node_selector;
+pub mod contribution_replication_manager;
 
 pub use intelligent_replication::{
     IntelligentReplicationManager, ReplicationStrategy, ContentType,
@@ -47,4 +49,12 @@ pub use reputation_system::{
 pub use network_health_monitor::{
     NetworkHealthMonitor, NetworkHealthReport, HealthAlert,
     AlertSeverity, GlobalNetworkMetrics, RegionalHealth
+};
+pub use contribution_node_selector::{
+    ContributionNodeSelector, NodeContribution, NodeReliability, SelectionWeights,
+    NodeSelectionCriteria, NodeSelectionResult, SelectedNode
+};
+pub use contribution_replication_manager::{
+    ContributionReplicationManager, ContributionReplicationPolicy, ReplicationJob,
+    ReplicationPerformanceStats
 };

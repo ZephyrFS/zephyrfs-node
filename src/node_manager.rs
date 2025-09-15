@@ -67,7 +67,7 @@ pub struct NodeStats {
     pub uptime_seconds: u64,
     
     /// Node start time
-    pub start_time: std::time::Instant,
+    pub start_time: crate::SerializableInstant,
 }
 
 /// File distribution strategy for P2P sharing
@@ -138,7 +138,7 @@ impl NodeManager {
             peer_connections: 0,
             failed_requests: 0,
             uptime_seconds: 0,
-            start_time: std::time::Instant::now(),
+            start_time: crate::SerializableInstant::now(),
         }));
 
         Ok(Self {

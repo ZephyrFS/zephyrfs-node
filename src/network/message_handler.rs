@@ -76,7 +76,7 @@ pub struct MessageHandler {
 
 #[derive(Debug)]
 struct PendingRequest {
-    timestamp: std::time::Instant,
+    timestamp: crate::SerializableInstant,
     response_tx: mpsc::Sender<ZephyrMessage>,
 }
 

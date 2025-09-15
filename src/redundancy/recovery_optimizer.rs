@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, BTreeMap, HashSet};
 use chrono::{DateTime, Utc, Duration};
 
-use crate::economics::GeographicRegion;
+use crate::economics::earnings_calculator::GeographicRegion;
 use super::reed_solomon::{EncodedChunk, ReconstructionRequest};
 
 /// Bandwidth-optimized recovery manager
@@ -468,7 +468,7 @@ impl RecoveryOptimizer {
             for chunk_id in chunk_batch {
                 if let Some(locations) = available_chunks.get(chunk_id) {
                     let source = self.select_bandwidth_optimal_source(locations, bandwidth_per_chunk)?;
-                    batch_sources.push(source.node_id);
+                    batch_sources.push(source.node_id.clone());
                 }
             }
 
@@ -503,7 +503,7 @@ impl RecoveryOptimizer {
                 steps.push(RecoveryStep {
                     step_id: format!("basic_recovery_{}", idx),
                     step_type: RecoveryStepType::DirectTransfer,
-                    source_nodes: vec![source.node_id],
+                    source_nodes: vec![source.node_id.clone()],
                     target_chunks: vec![chunk_id.clone()],
                     estimated_duration_seconds: 30.0,
                     bandwidth_requirement_mbps: 25.0,
@@ -517,7 +517,7 @@ impl RecoveryOptimizer {
     }
 
     /// Select best source node from available locations
-    fn select_best_source(&self, locations: &[NodeLocation]) -> Result<&NodeLocation> {
+    fn select_best_source<'a>(&self, locations: &'a [NodeLocation]) -> Result<&'a NodeLocation> {
         let mut best_location = &locations[0];
         let mut best_score = 0.0;
 
@@ -579,11 +579,11 @@ impl RecoveryOptimizer {
     }
 
     /// Select bandwidth-optimal source
-    fn select_bandwidth_optimal_source(
+    fn select_bandwidth_optimal_source<'a>(
         &self,
-        locations: &[NodeLocation],
+        locations: &'a [NodeLocation],
         required_bandwidth: f64,
-    ) -> Result<&NodeLocation> {
+    ) -> Result<&'a NodeLocation> {
         let mut best_location = &locations[0];
         let mut best_bandwidth = 0.0;
 
@@ -704,7 +704,7 @@ impl RecoveryOptimizer {
 
     /// Execute recovery plan
     pub async fn execute_recovery_plan(&mut self, plan: &RecoveryPlan) -> Result<RecoveryExecutionResult> {
-        let start_time = std::time::Instant::now();
+        let start_time = crate::SerializableInstant::now();
         let mut executed_steps = Vec::new();
         let mut total_bytes_recovered = 0u64;
 

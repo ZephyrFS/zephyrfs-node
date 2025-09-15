@@ -9,7 +9,7 @@ use std::collections::{HashMap, VecDeque, HashSet};
 use chrono::{DateTime, Utc, Duration};
 use tokio::time::{sleep, Duration as TokioDuration};
 
-use crate::economics::GeographicRegion;
+use crate::economics::earnings_calculator::GeographicRegion;
 use super::health_monitor::{ChunkHealth, ReplicaHealth, ReplicaStatus, HealthStatus};
 use super::intelligent_replication::{ReplicationStrategy, ContentType};
 

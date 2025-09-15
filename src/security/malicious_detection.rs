@@ -67,6 +67,9 @@ pub enum AnalysisPriority {
 /// Context information for analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisContext {
+    /// Chunk identifier being analyzed
+    pub chunk_id: Option<uuid::Uuid>,
+
     /// Source of the chunk (upload, replication, etc.)
     pub source: String,
 
@@ -487,7 +490,7 @@ impl MaliciousContentDetector {
     async fn analyze_signatures(&self, encrypted_data: &EncryptedData) -> Result<AnalysisComponent> {
         let signatures = self.signatures.read().await;
         let mut threat_level = ThreatLevel::Low;
-        let mut confidence = 0.0;
+        let mut confidence: f64 = 0.0;
         let mut indicators = Vec::new();
 
         // Hash the encrypted data for comparison
@@ -524,7 +527,7 @@ impl MaliciousContentDetector {
     /// Analyze statistical properties of encrypted data
     async fn analyze_statistics(&self, encrypted_data: &EncryptedData) -> Result<AnalysisComponent> {
         let mut threat_level = ThreatLevel::Low;
-        let mut confidence = 0.0;
+        let mut confidence: f64 = 0.0;
         let mut indicators = Vec::new();
 
         let data = &encrypted_data.ciphertext;
@@ -548,14 +551,14 @@ impl MaliciousContentDetector {
             indicators.push("Unusually small chunk size".to_string());
             confidence = confidence.max(0.3);
         } else if data.len() > 100 * 1024 * 1024 {
-            threat_level = threat_level.max(ThreatLevel::Medium);
+            threat_level = std::cmp::max(threat_level, ThreatLevel::Medium);
             confidence = confidence.max(0.6);
             indicators.push("Unusually large chunk size".to_string());
         }
 
         // Check for pattern repetition
         if self.detect_repetitive_patterns(data) {
-            threat_level = threat_level.max(ThreatLevel::Medium);
+            threat_level = std::cmp::max(threat_level, ThreatLevel::Medium);
             confidence = confidence.max(0.8);
             indicators.push("Repetitive patterns detected".to_string());
         }
@@ -572,7 +575,7 @@ impl MaliciousContentDetector {
     /// Analyze network context for threats
     async fn analyze_network_context(&self, context: &AnalysisContext) -> Result<AnalysisComponent> {
         let mut threat_level = ThreatLevel::Low;
-        let mut confidence = 0.0;
+        let mut confidence: f64 = 0.0;
         let mut indicators = Vec::new();
 
         if let Some(peer_info) = &context.peer_info {
@@ -589,7 +592,7 @@ impl MaliciousContentDetector {
 
             // Check violation history
             if peer_info.historical_violations > 5 {
-                threat_level = threat_level.max(ThreatLevel::Medium);
+                threat_level = std::cmp::max(threat_level, ThreatLevel::Medium);
                 confidence = confidence.max(0.7);
                 indicators.push(format!("High violation count: {}", peer_info.historical_violations));
             }
@@ -776,6 +779,50 @@ impl MaliciousContentDetector {
             },
         }
     }
+
+    /// Analyze content using the existing analyze_chunk method
+    pub async fn analyze_content(
+        &self,
+        encrypted_data: &EncryptedData,
+        metadata: &HashMap<String, String>,
+    ) -> Result<ThreatAnalysisResult> {
+        // Create analysis context from metadata
+        let context = AnalysisContext {
+            chunk_id: None,
+            source: metadata.get("source").unwrap_or(&"unknown".to_string()).clone(),
+            peer_info: None,
+            upload_metadata: metadata.clone(),
+            temporal_context: TemporalContext {
+                upload_time: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                burst_indicator: false,
+                unusual_timing: false,
+                rate_limit_triggered: false,
+            },
+        };
+
+        // Forward to analyze_chunk with default priority
+        self.analyze_chunk(
+            uuid::Uuid::new_v4(),
+            encrypted_data.clone(),
+            context,
+            AnalysisPriority::Normal,
+        ).await
+    }
+
+    /// Get threat history for a chunk
+    pub async fn get_threat_history(&self, _chunk_id: Uuid) -> Vec<ThreatAnalysisResult> {
+        // TODO: Implement threat history tracking
+        vec![]
+    }
+
+    /// Update detector configuration
+    pub fn update_config(&mut self, _config: DetectionConfig) -> Result<()> {
+        // TODO: Implement configuration updates
+        Ok(())
+    }
 }
 
 // Implementation stubs for other components...
@@ -834,6 +881,8 @@ impl TemporalAnalyzer {
             indicators: Vec::new(),
         })
     }
+
+
 }
 
 impl PatternMatcher {
@@ -854,6 +903,19 @@ impl PatternMatcher {
             indicators: Vec::new(),
         })
     }
+
+    /// Get threat history for a chunk
+    pub async fn get_threat_history(&self, _chunk_id: Uuid) -> Vec<ThreatAnalysisResult> {
+        // TODO: Implement threat history tracking
+        vec![]
+    }
+
+    /// Update detector configuration
+    pub fn update_config(&mut self, _config: DetectionConfig) -> Result<()> {
+        // TODO: Implement configuration updates
+        Ok(())
+    }
+
 }
 
 impl QuarantineManager {
@@ -872,6 +934,7 @@ impl QuarantineManager {
         threat_level: ThreatLevel,
         automated: bool,
     ) -> Result<()> {
+        let quarantine_reason_copy = reason.clone();
         let quarantined_chunk = QuarantinedChunk {
             chunk_id,
             quarantine_reason: reason,
@@ -903,7 +966,7 @@ impl QuarantineManager {
             }
         }
 
-        info!("Quarantined chunk {} due to: {}", chunk_id, quarantined_chunk.quarantine_reason);
+        info!("Quarantined chunk {} due to: {}", chunk_id, quarantine_reason_copy);
         Ok(())
     }
 
@@ -926,6 +989,52 @@ impl QuarantineManager {
                 delete_after_quarantine: false,
             },
         ]
+    }
+
+    /// Check if a chunk is quarantined
+    pub async fn is_quarantined(&self, chunk_id: Uuid) -> Result<bool> {
+        let chunks = self.quarantined_chunks.read().await;
+        Ok(chunks.contains_key(&chunk_id))
+    }
+
+    /// Get quarantine status for a chunk
+    pub async fn get_quarantine_status(&self, chunk_id: Uuid) -> Result<QuarantineStatus> {
+        let chunks = self.quarantined_chunks.read().await;
+        if let Some(quarantined_chunk) = chunks.get(&chunk_id) {
+            Ok(QuarantineStatus {
+                is_quarantined: true,
+                quarantine_reason: quarantined_chunk.quarantine_reason.clone(),
+                quarantined_at: quarantined_chunk.quarantined_at,
+                threat_level: quarantined_chunk.threat_level,
+                average_quarantine_duration_hours: 24.0,
+                automatic_releases: 0,
+                manual_reviews_required: if quarantined_chunk.threat_level == ThreatLevel::Critical { 1 } else { 0 },
+            })
+        } else {
+            Err(anyhow::anyhow!("Chunk not found in quarantine: {}", chunk_id))
+        }
+    }
+
+    /// Make quarantine_chunk method public
+    pub async fn quarantine_chunk(&mut self, chunk_id: Uuid, reason: String, threat_level: ThreatLevel, automated: bool) -> Result<()> {
+        let quarantined_chunk = QuarantinedChunk {
+            chunk_id,
+            quarantine_reason: reason,
+            quarantined_at: SystemTime::now(),
+            quarantine_duration: match threat_level {
+                ThreatLevel::Medium => Some(Duration::from_secs(3600)),
+                ThreatLevel::High => Some(Duration::from_secs(86400)),
+                ThreatLevel::Critical => None, // Manual review required
+                _ => Some(Duration::from_secs(1800)),
+            },
+            threat_level,
+            automated,
+            review_required: threat_level == ThreatLevel::Critical,
+        };
+
+        let mut chunks = self.quarantined_chunks.write().await;
+        chunks.insert(chunk_id, quarantined_chunk);
+        Ok(())
     }
 }
 
@@ -981,4 +1090,72 @@ mod tests {
 
         assert_eq!(result.overall_threat_level, ThreatLevel::High); // Low entropy should trigger high threat
     }
+}
+
+/// Configuration for malicious content detection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectionConfig {
+    /// Enable behavioral analysis
+    pub enable_behavioral_analysis: bool,
+    /// Enable pattern matching
+    pub enable_pattern_matching: bool,
+    /// Enable temporal analysis
+    pub enable_temporal_analysis: bool,
+    /// Maximum analysis time per chunk (seconds)
+    pub max_analysis_time_seconds: u32,
+    /// Threat signature database update interval (hours)
+    pub signature_update_interval_hours: u32,
+}
+
+impl Default for DetectionConfig {
+    fn default() -> Self {
+        Self {
+            enable_behavioral_analysis: true,
+            enable_pattern_matching: true,
+            enable_temporal_analysis: true,
+            max_analysis_time_seconds: 30,
+            signature_update_interval_hours: 6,
+        }
+    }
+}
+
+/// Threat indicator for security analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreatIndicator {
+    pub indicator_type: ThreatIndicatorType,
+    pub severity: ThreatSeverity,
+    pub description: String,
+    pub confidence_score: f64,
+    pub detected_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Types of threat indicators
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ThreatIndicatorType {
+    SuspiciousPattern,
+    BehavioralAnomaly,
+    KnownMalware,
+    UnusualEntropy,
+    SuspiciousMetadata,
+}
+
+/// Severity levels for threats
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ThreatSeverity {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+/// Status information for a quarantined chunk
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuarantineStatus {
+    pub is_quarantined: bool,
+    pub quarantine_reason: String,
+    pub quarantined_at: SystemTime,
+    pub threat_level: ThreatLevel,
+    pub average_quarantine_duration_hours: f64,
+    pub automatic_releases: u32,
+    pub manual_reviews_required: u32,
 }

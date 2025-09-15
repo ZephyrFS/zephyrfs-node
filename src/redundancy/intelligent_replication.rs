@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, BTreeMap};
 use chrono::{DateTime, Utc, Duration};
 
-use crate::economics::{NetworkHealthMetrics, VolunteerMetrics, GeographicRegion};
+use crate::economics::{NetworkHealthMetrics, VolunteerMetrics, ContributionTracker};
+use crate::economics::earnings_calculator::GeographicRegion;
+use super::contribution_node_selector::{ContributionNodeSelector, NodeSelectionCriteria, NodeSelectionResult};
 
 /// Intelligent replication manager
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,8 +25,10 @@ pub struct IntelligentReplicationManager {
     pub geo_distribution: GeographicDistributionConfig,
     /// Adaptive redundancy configuration
     pub adaptive_config: AdaptiveRedundancyConfig,
-    /// Cost optimization settings
+    /// Cost optimization configuration
     pub cost_config: CostOptimizationConfig,
+    /// Contribution-based node selector
+    pub node_selector: ContributionNodeSelector,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
